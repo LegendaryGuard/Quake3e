@@ -2097,6 +2097,298 @@ static qboolean SV_ClientCommand( client_t *cl, msg_t *msg ) {
 
 //==================================================================================
 
+static int last_pm_flags[MAX_CLIENTS];
+static int last_eFlags[MAX_CLIENTS];
+static int last_stats[MAX_CLIENTS][16];
+static int last_powerups[MAX_CLIENTS][16];
+static int last_ps_weapon[MAX_CLIENTS];
+static int last_ps_ammo[MAX_CLIENTS][16];
+static int last_weaponstate[MAX_CLIENTS];
+static int last_persistant[MAX_CLIENTS][16];
+static int last_generic1[MAX_CLIENTS];
+
+static int last_es_time2[MAX_CLIENTS];
+static int last_es_frame[MAX_CLIENTS];
+
+
+/*
+===============
+SV_DebugPmflags
+===============
+*/
+static void SV_DebugPmflags( int clientNum, playerState_t *ps ) {
+	int i;
+	if ( sv_debugPmflags->integer <= 0 || ps->pm_flags == last_pm_flags[clientNum] ) {
+		return;
+	}
+
+	Com_Printf( "CL %d PM_FLAGS (%d): ", clientNum, ps->pm_flags );
+	for ( i = 0; i < 17; i++ ) {
+		int bit = ( 1 << i );
+		if ( ps->pm_flags & bit ) {
+			Com_Printf( "(PMF_%d - %d) | ", i + 1, bit );
+		}
+	}
+	Com_Printf( "\n" );
+	last_pm_flags[clientNum] = ps->pm_flags;
+}
+
+
+/*
+===============
+SV_DebugEflags
+===============
+*/
+static void SV_DebugEflags( int clientNum, playerState_t *ps ) {
+	int i;
+	if ( sv_debugEflags->integer <= 0 || ps->eFlags == last_eFlags[clientNum] ) {
+		return;
+	}
+
+	Com_Printf( "CL %d EFLAGS (0x%x): ", clientNum, ps->eFlags );
+	for ( i = 0; i < 20; i++ ) {
+		int bit = ( 1 << i );
+		if ( ps->eFlags & bit ) {
+			Com_Printf( "(EF_%d = 0x%x) | ", i + 1, bit );
+		}
+	}
+	Com_Printf( "\n" );
+	last_eFlags[clientNum] = ps->eFlags;
+}
+
+
+/*
+===============
+SV_DebugStats
+===============
+*/
+static void SV_DebugStats( int clientNum, playerState_t *ps ) {
+	int i;
+	qboolean changed = qfalse;
+	if ( sv_debugStats->integer <= 0 ) {
+		return;
+	}
+
+	for ( i = 0; i < 16; i++ ) {
+		if ( ps->stats[i] != last_stats[clientNum][i] ) {
+			if ( !changed ) {
+				Com_Printf( "CL %d: ", clientNum );
+				changed = qtrue;
+			}
+
+			Com_Printf( "STAT_%d: %d->%d | ", i, last_stats[clientNum][i], ps->stats[i] );
+			last_stats[clientNum][i] = ps->stats[i];
+		}
+	}
+
+	if ( changed ) {
+		Com_Printf( "\n" );
+	}
+}
+
+
+/*
+===============
+SV_DebugPowerups
+===============
+*/
+static void SV_DebugPowerups( int clientNum, playerState_t *ps ) {
+	int i;
+	qboolean changed = qfalse;
+	if ( sv_debugPowerups->integer <= 0 ) {
+		return;
+	}
+
+	for ( i = 0; i < 16; i++ ) {
+		if ( ps->powerups[i] != last_powerups[clientNum][i] ) {
+			if ( !changed ) {
+				Com_Printf( "CL %d: ", clientNum );
+				changed = qtrue;
+			}
+
+			Com_Printf( "PW_%d: %d->%d | ", i, last_powerups[clientNum][i], ps->powerups[i] );			
+			last_powerups[clientNum][i] = ps->powerups[i];
+		}
+	}
+
+	if ( changed ) {
+		Com_Printf( "\n" );
+	}
+}
+
+
+/*
+===============
+SV_DebugPSWeaponState
+===============
+*/
+static void SV_DebugPSWeaponState( int clientNum, playerState_t *ps ) {
+	qboolean changed = qfalse;
+	if ( sv_debugPSWeaponState->integer <= 0 ) {
+		return;
+	}
+
+	if ( ps->weaponstate != last_weaponstate[clientNum] ) {
+		if ( !changed ) {
+			Com_Printf( "CL %d WEAPONSTATE: ", clientNum );
+			changed = qtrue;
+		}
+
+		Com_Printf( "WEAPON_%d->%d | ", last_weaponstate[clientNum], ps->weaponstate );
+		last_weaponstate[clientNum] = ps->weaponstate;
+	}
+
+	if ( changed ) {
+		Com_Printf( "\n" );
+	}
+}
+
+
+/*
+===============
+SV_DebugPSPersistant
+===============
+*/
+static void SV_DebugPSPersistant( int clientNum, playerState_t *ps ) {
+	int i;
+	qboolean changed = qfalse;
+	if ( sv_debugPSPersistant->integer <= 0 ) {
+		return;
+	}
+
+	for ( i = 0; i < 16; i++ ) {
+		if ( ps->persistant[i] != last_persistant[clientNum][i] ) {
+			if ( !changed ) {
+				Com_Printf( "CL %d: ", clientNum );
+				changed = qtrue;
+			}
+
+			Com_Printf( "PERS_%d: %d->%d | ", i, last_persistant[clientNum][i], ps->persistant[i] );
+			last_persistant[clientNum][i] = ps->persistant[i];
+		}
+	}
+
+	if ( changed ) {
+		Com_Printf( "\n" );
+	}
+}
+
+
+/*
+===============
+SV_DebugPSWeaponAmmo
+===============
+*/
+static void SV_DebugPSWeaponAmmo( int clientNum, playerState_t *ps ) {
+	int i;
+	qboolean changed = qfalse;
+	if ( sv_debugPSWeaponAmmo->integer <= 0 ) {
+		return;
+	}
+
+	if ( ps->weapon != last_ps_weapon[clientNum] ) {
+		Com_Printf( "CL %d WEAPON: %d -> %d |.| ", clientNum, last_ps_weapon[clientNum], ps->weapon );
+		last_ps_weapon[clientNum] = ps->weapon;
+	}
+
+	for ( i = 0; i < 16; i++ ) {
+		if ( ps->ammo[i] != last_ps_ammo[clientNum][i] ) {
+			if ( !changed ) {
+				Com_Printf( "CL %d AMMO: ", clientNum );
+				changed = qtrue;
+			}
+			Com_Printf( "WP_%d: %d->%d | ", i, last_ps_ammo[clientNum][i], ps->ammo[i] );
+			last_ps_ammo[clientNum][i] = ps->ammo[i];
+		}
+	}
+
+	if ( changed ) {
+		Com_Printf( "\n" );
+	}
+}
+
+
+/*
+===============
+SV_DebugGeneric1
+===============
+*/
+static void SV_DebugGeneric1( int clientNum, playerState_t *ps ) {
+	int i;
+	if ( sv_debugGeneric1->integer <= 0 || !ps->generic1 ) {
+		return;
+	}
+
+	if ( ps->generic1 != last_generic1[clientNum] ) {
+        Com_Printf( "CL %d GENERIC1: %d -> %d |.| ", clientNum, last_generic1[clientNum], ps->generic1 );
+        last_generic1[clientNum] = ps->generic1;
+    }
+
+	for ( i = 0; i < 8; i++ ) {
+		int bit = ( 1 << i );
+		if ( ps->generic1 & bit ) {
+			Com_Printf( "(GENF_%d = 0x%x) | ", i + 1, bit );
+		}
+	}
+	Com_Printf( "\n" );
+}
+
+
+/*
+===============
+SV_DebugESTime2
+===============
+*/
+static void SV_DebugESTime2( int clientNum, entityState_t *es ) {
+	int i;
+	if ( sv_debugESTime2->integer <= 0 || !es->time2 ) {
+		return;
+	}
+
+	if ( es->time2 != last_es_time2[clientNum] ) {
+		Com_Printf( "CL %d ENTITY: ", clientNum );
+		if ( es->time2 != last_es_time2[clientNum] ) {
+			Com_Printf( "TIME2: %d->%d ", last_es_time2[clientNum], es->time2 );
+			for ( i = 0; i < 32; i++ ) {
+				int bit = ( 1 << i );
+				if ( es->time2 & bit ) {
+					Com_Printf( "(ES_TIME2F_%d = 0x%x) | ", i + 1, bit );
+				}
+			}
+			last_es_time2[clientNum] = es->time2;
+		}
+		Com_Printf( "\n" );
+	}
+}
+
+
+/*
+===============
+SV_DebugESFrame
+===============
+*/
+static void SV_DebugESFrame( int clientNum, entityState_t *es ) {
+	int i;
+	if ( sv_debugESFrame->integer <= 0 || !es->frame ) {
+		return;
+	}
+
+	if ( es->frame != last_es_frame[clientNum] ) {
+		Com_Printf( "CL %d ENTITY: ", clientNum );
+		if ( es->frame != last_es_frame[clientNum] ) {
+			Com_Printf( "FRAME: %d->%d ", last_es_frame[clientNum], es->frame );
+			for ( i = 0; i < 16; i++ ) {
+				int bit = ( 1 << i );
+				if ( es->frame & bit ) {
+					Com_Printf( "(ES_FRAMEF_%d = 0x%x) | ", i + 1, bit );
+				}
+			}
+			last_es_frame[clientNum] = es->frame;
+		}
+		Com_Printf( "\n" );
+	}
+}
+
 
 /*
 ==================
@@ -2106,13 +2398,37 @@ Also called by bot code
 ==================
 */
 void SV_ClientThink (client_t *cl, usercmd_t *cmd) {
+	playerState_t	*ps;
+	entityState_t	*es;
+	int	clientNum;
 	cl->lastUsercmd = *cmd;
+
+	clientNum = cl - svs.clients;
+	ps = SV_GameClientNum( clientNum );
+	if ( ps ) {
+		SV_DebugPmflags( clientNum, ps );
+		SV_DebugEflags( clientNum, ps );
+		SV_DebugStats( clientNum, ps );
+		SV_DebugPowerups( clientNum, ps );
+		SV_DebugPSWeaponState( clientNum, ps );
+		SV_DebugPSPersistant( clientNum, ps );
+		SV_DebugPSWeaponAmmo( clientNum, ps );
+		SV_DebugGeneric1( clientNum, ps );
+	}
+
+	if ( clientNum == cl->gentity->s.number ) {
+		es = &cl->gentity->s;
+	}
+	if ( es ) {
+		SV_DebugESTime2( clientNum, es );
+		SV_DebugESFrame( clientNum, es );
+	}
 
 	if ( cl->state != CS_ACTIVE ) {
 		return;		// may have been kicked during the last usercmd
 	}
 
-	VM_Call( gvm, 1, GAME_CLIENT_THINK, cl - svs.clients );
+	VM_Call( gvm, 1, GAME_CLIENT_THINK, clientNum );
 }
 
 

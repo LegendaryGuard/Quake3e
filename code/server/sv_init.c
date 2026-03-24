@@ -806,6 +806,36 @@ void SV_Init( void )
 	sv_filter = Cvar_Get( "sv_filter", "filter.txt", CVAR_ARCHIVE );
 	Cvar_SetDescription( sv_filter, "Cvar that point on filter file, if it is "" then filtering will be disabled." );
 
+	sv_debugPmflags = Cvar_Get( "sv_debugPmflags", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugPmflags, "Shows players' PMF_ flags for debugging purposes." );
+
+	sv_debugEflags = Cvar_Get( "sv_debugEflags", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugEflags, "Shows players' EF_ flags for debugging purposes." );
+
+	sv_debugStats = Cvar_Get( "sv_debugStats", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugStats, "Shows players' STAT_s for debugging purposes." );
+
+	sv_debugPowerups = Cvar_Get( "sv_debugPowerups", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugPowerups, "Shows players' PW_s for debugging purposes." );
+
+	sv_debugPSWeaponState = Cvar_Get( "sv_debugPSWeaponState", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugPSWeaponState, "Shows players' weapon states for debugging purposes." );
+
+	sv_debugPSPersistant = Cvar_Get( "sv_debugPSPersistant", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugPSPersistant, "Shows players' persistant fields for debugging purposes." );
+
+	sv_debugPSWeaponAmmo = Cvar_Get( "sv_debugPSWeaponAmmo", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugPSWeaponAmmo, "Shows players' weapons and ammo for debugging purposes." );
+
+	sv_debugGeneric1 = Cvar_Get( "sv_debugGeneric1", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugGeneric1, "Shows players' generic1 for debugging purposes." );
+
+	sv_debugESTime2 = Cvar_Get( "sv_debugESTime2", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugESTime2, "Shows players' entityState time2 for debugging purposes." );
+
+	sv_debugESFrame = Cvar_Get( "sv_debugESFrame", "0", CVAR_DEVELOPER );
+	Cvar_SetDescription( sv_debugESFrame, "Shows players' entityState frame for debugging purposes." );
+
 	// initialize bot cvars so they are listed and can be set before loading the botlib
 	SV_BotInitCvars();
 

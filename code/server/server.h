@@ -312,6 +312,19 @@ extern	cvar_t	*sv_lanForceRate;
 extern	cvar_t *sv_levelTimeReset;
 extern	cvar_t *sv_filter;
 
+extern	cvar_t	*sv_debugPmflags;
+extern	cvar_t	*sv_debugEflags;
+extern	cvar_t	*sv_debugStats;
+extern	cvar_t	*sv_debugPowerups;
+extern	cvar_t	*sv_debugPSWeaponState;
+extern	cvar_t	*sv_debugPSPersistant;
+extern	cvar_t	*sv_debugPSWeaponAmmo;
+extern	cvar_t	*sv_debugGeneric1;
+
+extern	cvar_t	*sv_debugESTime2;
+extern	cvar_t	*sv_debugESFrame;
+
+
 #ifdef USE_BANS
 extern	cvar_t	*sv_banFile;
 extern	serverBan_t serverBans[SERVER_MAXBANS];
