@@ -478,9 +478,14 @@ void *Sys_LoadLibrary( const char *name )
 		Com_Error( ERR_FATAL, "Sys_LoadLibrary: Unable to load library with '%s' extension", ext );
 	}
 
-	Com_Printf( "^1ATTENTION ATTENTION PRINTING RTLD_NOW %d\n", RTLD_NOW );
-	Com_Printf( "'%s' name\n", name );
-	Com_Printf( "'%s' extension\n", ext );
+	dlerror();
+	handle = dlopen( name, RTLD_NOW );
+
+	if ( !handle )
+	{
+		const char *err = dlerror();
+		Com_Printf( "^1Sys_LoadLibrary('%s') failed: %s\n", name, err ? err : "unknown error" );
+	}
 
 	handle = dlopen( name, RTLD_NOW );
 	return handle;
