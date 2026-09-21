@@ -358,6 +358,32 @@ ifeq ($(GENERATE_DEPENDENCIES),1)
 endif
 
 
+# BFPR: platform.arch naming for <platform>.<arch>.<engine>.<ext>
+# Normalize PLATFORM for filenames: mingw* -> windows, darwin -> macos, else linux
+ifeq ($(findstring mingw,$(PLATFORM)),mingw)
+  PLATFORM_NORM := windows
+else ifeq ($(PLATFORM),darwin)
+  PLATFORM_NORM := macos
+else
+  PLATFORM_NORM := linux
+endif
+
+# Normalize ARCH for filenames: x86_64 -> x64, aarch64 -> arm64, else as-is
+ifeq ($(ARCH),x86_64)
+  ARCH_NORM := x64
+else ifeq ($(ARCH),aarch64)
+  ARCH_NORM := arm64
+else
+  ARCH_NORM := $(ARCH)
+endif
+
+# Override BINEXT for deterministic extensions: windows .exe, linux .elf, macos .elf/dylib handled separately
+ifdef MINGW
+  override BINEXT := .exe
+else
+  override BINEXT := .elf
+endif
+
 ARCHEXT=
 
 CLIENT_EXTRA_FILES=
@@ -402,11 +428,30 @@ ifdef MINGW
       WINDRES=$(firstword $(strip $(foreach MINGW_PREFIX, $(MINGW_PREFIXES), \
          $(call bin_path, $(MINGW_PREFIX)-windres))))
     endif
+
+    # BFPR: binutils for deps\ cadence import libs (dlltool) + symbol harvest (nm)
+    ifndef NM
+      NM=$(firstword $(strip $(foreach MINGW_PREFIX, $(MINGW_PREFIXES), \
+         $(call bin_path, $(MINGW_PREFIX)-nm)) $(call bin_path,nm)))
+    endif
+
+    ifndef DLLTOOL
+      DLLTOOL=$(firstword $(strip $(foreach MINGW_PREFIX, $(MINGW_PREFIXES), \
+         $(call bin_path, $(MINGW_PREFIX)-dlltool)) $(call bin_path,dlltool)))
+    endif
   else
     # Some MinGW installations define CC to cc, but don't actually provide cc,
     # so check that CC points to a real binary and use gcc if it doesn't
     ifeq ($(call bin_path, $(CC)),)
       override CC=gcc
+    endif
+
+    # MSYS2 native
+    ifndef NM
+      NM := nm
+    endif
+    ifndef DLLTOOL
+      DLLTOOL := dlltool
     endif
 
   endif
@@ -420,10 +465,10 @@ ifdef MINGW
     $(error Cannot find a suitable cross compiler for $(PLATFORM))
   endif
 
-  BASE_CFLAGS += -Wall -Wimplicit -Wstrict-prototypes -DUSE_ICON -DMINGW=1
+  BASE_CFLAGS += -Wall -Wimplicit -Wstrict-prototypes -DUSE_ICON -DMINGW=1 -std=gnu89 -fgnu89-inline -D__CRT__NO_INLINE -D__USE_MINGW_ANSI_STDIO=0
 
-  BASE_CFLAGS += -Wno-unused-result -fvisibility=hidden
-  BASE_CFLAGS += -ffunction-sections -flto
+  BASE_CFLAGS += -Wno-unused-result
+  BASE_CFLAGS += -ffunction-sections
 
   ifeq ($(ARCH),x86_64)
     ARCHEXT = .x64
@@ -432,6 +477,7 @@ ifdef MINGW
   endif
   ifeq ($(ARCH),x86)
     BASE_CFLAGS += -m32
+    LDFLAGS += -m32
     OPTIMIZE = -O2 -march=i586 -mtune=i686 -ffast-math
   endif
 
@@ -442,24 +488,61 @@ ifdef MINGW
   BINEXT = .exe
 
   LDFLAGS += -mwindows -Wl,--dynamicbase -Wl,--nxcompat
-  LDFLAGS += -Wl,--gc-sections -fvisibility=hidden
+  LDFLAGS += -Wl,--gc-sections
+  LDFLAGS += -static-libgcc -static-libstdc++
   LDFLAGS += -lwsock32 -lgdi32 -lwinmm -lole32 -lws2_32 -lpsapi -lcomctl32 -liphlpapi
-  LDFLAGS += -flto
+  SHLIBLDFLAGS = -shared $(LDFLAGS)
+  # BFP: rpath for coherence with Linux (Windows loader ignores, but keeps deps layout uniform)
+  LDFLAGS += -Wl,-rpath,'$$ORIGIN/deps' -Wl,-rpath,'$$ORIGIN/../deps'
 
   CLIENT_LDFLAGS=$(LDFLAGS)
 
   ifeq ($(USE_SDL),1)
-    BASE_CFLAGS += -DUSE_LOCAL_HEADERS=1 -I$(SDLHDIR)
+    BASE_CFLAGS += -DUSE_LOCAL_HEADERS=1 -I$(SDLHDIR) -DWINVER=0x0601 -D_WIN32_WINNT=0x0601
     #CLIENT_CFLAGS += -DUSE_LOCAL_HEADERS=1
+    # BFPR deps\ cadence: the exe links dlltool-built import libs that name
+    # deps\<platform>.<arch>.<lib>.dll, so the Windows loader resolves the
+    # bundled DLLs with zero post-link import-table rewriting (patch-only).
     ifeq ($(ARCH),x86)
-      CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libsdl/windows/mingw/lib32
-      CLIENT_LDFLAGS += -lSDL2
-      CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libsdl/windows/mingw/lib32/SDL2.dll
+      BFPR_SDL_SRC=$(MOUNT_DIR)/libsdl/windows/mingw/lib32/SDL2.dll
+      BFPR_SDL_IMP=$(MOUNT_DIR)/libsdl/windows/mingw/lib32/libSDL2.dll.a
+      BFPR_SDL_DLL=windows.x86.SDL2.dll
     else
-      CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libsdl/windows/mingw/lib64
-      CLIENT_LDFLAGS += -lSDL264
-      CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libsdl/windows/mingw/lib64/SDL264.dll
+      BFPR_SDL_SRC=$(MOUNT_DIR)/libsdl/windows/mingw/lib64/SDL264.dll
+      BFPR_SDL_IMP=$(MOUNT_DIR)/libsdl/windows/mingw/lib64/libSDL264.dll.a
+      BFPR_SDL_DLL=windows.x64.SDL2.dll
     endif
+    CLIENT_LDFLAGS += -L$(B) -lSDL2cad
+  endif
+
+  # BFPR: mingw zlib comes from the sysroot (or a local extraction) and binds
+  # to the deps\ cadence name via dlltool, same as SDL above.
+  # x86 prefers patches/windows.x86.zlib.dll: zlib 1.3.1 rebuilt with
+  # -static-libgcc, because the Fedora mingw32-zlib binary links
+  # libgcc_s_dw2-1.dll (absent on user machines -> x86 exe won't start).
+    ifeq ($(ARCH),x86)
+    BFPR_ZLIB_IMP=$(firstword $(wildcard \
+      /mingw32/lib/libz.dll.a \
+      /usr/i686-w64-mingw32/sys-root/mingw/lib/libz.dll.a \
+      $(MOUNT_DIR)/../../usr/i686-w64-mingw32/sys-root/mingw/lib/libz.dll.a \
+      /tmp/mingw32_root/usr/i686-w64-mingw32/sys-root/mingw/lib/libz.dll.a))
+    BFPR_ZLIB_SRC=$(firstword $(wildcard \
+      ../patches/windows.x86.zlib.dll \
+      /mingw32/bin/zlib1.dll \
+      /usr/i686-w64-mingw32/sys-root/mingw/bin/zlib1.dll \
+      /tmp/mingw32_root/usr/i686-w64-mingw32/sys-root/mingw/bin/zlib1.dll))
+    BFPR_ZLIB_DLL=windows.x86.zlib.dll
+  else
+    BFPR_ZLIB_IMP=$(firstword $(wildcard \
+      /mingw64/lib/libz.dll.a \
+      /usr/x86_64-w64-mingw32/sys-root/mingw/lib/libz.dll.a \
+      $(MOUNT_DIR)/../../usr/x86_64-w64-mingw32/sys-root/mingw/lib/libz.dll.a \
+      /tmp/m64/usr/x86_64-w64-mingw32/sys-root/mingw/lib/libz.dll.a))
+    BFPR_ZLIB_SRC=$(firstword $(wildcard \
+      /mingw64/bin/zlib1.dll \
+      /usr/x86_64-w64-mingw32/sys-root/mingw/bin/zlib1.dll \
+      /tmp/m64/usr/x86_64-w64-mingw32/sys-root/mingw/bin/zlib1.dll))
+    BFPR_ZLIB_DLL=windows.x64.zlib.dll
   endif
 
   ifeq ($(USE_CURL),1)
@@ -469,7 +552,33 @@ ifdef MINGW
     else
       CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libcurl/windows/mingw/lib64
     endif
-    CLIENT_LDFLAGS += -lcurl -lz -lcrypt32
+    CLIENT_LDFLAGS += -lcurl -L$(B) -lzcad -lcrypt32
+    # Bundle libcurl.dll when present (shared curl); wildcard guards missing file
+    ifeq ($(ARCH),x86)
+      ifneq ($(wildcard $(MOUNT_DIR)/libcurl/windows/mingw/lib32/libcurl.dll),)
+        CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libcurl/windows/mingw/lib32/libcurl.dll
+      endif
+    else
+      ifneq ($(wildcard $(MOUNT_DIR)/libcurl/windows/mingw/lib64/libcurl.dll),)
+        CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libcurl/windows/mingw/lib64/libcurl.dll
+      endif
+    endif
+    # If SDL disabled, ensure zlib still bundled (curl needs it) - only if deps exist (zero-deps single-file omits it)
+    ifeq ($(USE_SDL),0)
+      ifeq ($(ARCH),x86)
+        ifneq ($(wildcard $(MOUNT_DIR)/../../deps/zlib1_x86.dll),)
+          ifeq ($(filter $(MOUNT_DIR)/../../deps/zlib1_x86.dll,$(CLIENT_EXTRA_FILES)),)
+            CLIENT_EXTRA_FILES += $(MOUNT_DIR)/../../deps/zlib1_x86.dll
+          endif
+        endif
+      else
+        ifneq ($(wildcard $(MOUNT_DIR)/../../deps/zlib1.dll),)
+          ifeq ($(filter $(MOUNT_DIR)/../../deps/zlib1.dll,$(CLIENT_EXTRA_FILES)),)
+            CLIENT_EXTRA_FILES += $(MOUNT_DIR)/../../deps/zlib1.dll
+          endif
+        endif
+      endif
+    endif
   endif
 
   ifeq ($(USE_OGG_VORBIS),1)
@@ -618,7 +727,58 @@ else
   endif
 
   ifeq ($(PLATFORM),linux)
-    LDFLAGS += -ldl -Wl,--hash-style=both
+    LDFLAGS += -ldl -Wl,--hash-style=both -Wl,-rpath,'$$ORIGIN/deps' -Wl,-rpath,'$$ORIGIN/../deps'
+    ifeq ($(USE_LOCAL_HEADERS),1)
+      BASE_CFLAGS += -I$(SDLHDIR)
+      # Portable SDL2 bundling: prefer vendored linux SDL2, fallback to prebuilt top-level deps
+      ifneq ($(wildcard $(MOUNT_DIR)/libsdl/linux/lib64/libSDL2.so.0),)
+        CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libsdl/linux/lib64 -lSDL2
+        CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libsdl/linux/lib64/libSDL2.so.0
+      else ifneq ($(wildcard $(MOUNT_DIR)/libsdl/linux/lib32/libSDL2.so.0),)
+        ifeq ($(ARCH),x86)
+          CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libsdl/linux/lib32 -lSDL2
+          CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libsdl/linux/lib32/libSDL2.so.0
+        else
+          CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libsdl/linux/lib64 -lSDL2
+          CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libsdl/linux/lib64/libSDL2.so.0
+        endif
+      else ifneq ($(wildcard $(MOUNT_DIR)/../../deps/libSDL2.so),)
+        # Prebuilt SDL2 at quake3e/deps (current portable build) - provides libSDL2.so + libSDL2-2.0.so.0
+        CLIENT_EXTRA_FILES += $(MOUNT_DIR)/../../deps/libSDL2.so
+        ifneq ($(wildcard $(MOUNT_DIR)/../../deps/libSDL2-2.0.so.0),)
+          CLIENT_EXTRA_FILES += $(MOUNT_DIR)/../../deps/libSDL2-2.0.so.0
+        endif
+        ifneq ($(wildcard $(MOUNT_DIR)/../../deps/libSDL2-2.0.so),)
+          CLIENT_EXTRA_FILES += $(MOUNT_DIR)/../../deps/libSDL2-2.0.so
+        endif
+        ifneq ($(wildcard $(MOUNT_DIR)/../../deps/libSDL2.so.0),)
+          CLIENT_EXTRA_FILES += $(MOUNT_DIR)/../../deps/libSDL2.so.0
+        endif
+        # Ensure linkage still uses SDL_LIBS (pkg-config) unless vendored L path exists
+        # CLIENT_LDFLAGS already has $(SDL_LIBS) from USE_SDL block
+      else
+        # Fallback: use system SDL via pkg-config (SDL_LIBS already set)
+        # Optionally bundle system lib for portable distribution (uncomment if desired):
+        # SDL_BUNDLED := $(shell ldconfig -p 2>/dev/null | grep -m1 "libSDL2.so.0" | sed -n 's/.*=> //p')
+        # ifneq ($(SDL_BUNDLED),)
+        #   CLIENT_EXTRA_FILES += $(SDL_BUNDLED)
+        # endif
+      endif
+      # Curl: bundle libcurl.so.4 when statically linked (USE_CURL_DLOPEN=0)
+      ifeq ($(USE_CURL),1)
+        ifeq ($(USE_CURL_DLOPEN),0)
+          ifneq ($(wildcard $(MOUNT_DIR)/libcurl/linux/lib64/libcurl.so.4),)
+            CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libcurl/linux/lib64/libcurl.so.4
+          else
+            # System libcurl (dlopen already handles; bundling optional)
+            # CURL_BUNDLED := $(shell ldconfig -p 2>/dev/null | grep -m1 "libcurl.so.4" | sed -n 's/.*=> //p')
+            # ifneq ($(CURL_BUNDLED),)
+            #   CLIENT_EXTRA_FILES += $(CURL_BUNDLED)
+            # endif
+          endif
+        endif
+      endif
+    endif
     ifeq ($(ARCH),x86)
       # linux32 make ...
       BASE_CFLAGS += -m32
@@ -636,13 +796,13 @@ endif # *NIX platforms
 endif # !MINGW
 
 
-TARGET_CLIENT = $(CNAME)$(ARCHEXT)$(BINEXT)
+TARGET_CLIENT = $(PLATFORM_NORM).$(ARCH_NORM).$(CNAME)$(BINEXT)
 
-TARGET_REND1 = $(RENDERER_PREFIX)_opengl_$(SHLIBNAME)
-TARGET_REND2 = $(RENDERER_PREFIX)_opengl2_$(SHLIBNAME)
-TARGET_RENDV = $(RENDERER_PREFIX)_vulkan_$(SHLIBNAME)
+TARGET_REND1 = deps/$(PLATFORM_NORM).$(ARCH_NORM).opengl.$(SHLIBEXT)
+TARGET_REND2 = deps/$(PLATFORM_NORM).$(ARCH_NORM).opengl2.$(SHLIBEXT)
+TARGET_RENDV = deps/$(PLATFORM_NORM).$(ARCH_NORM).vulkan.$(SHLIBEXT)
 
-TARGET_SERVER = $(DNAME)$(ARCHEXT)$(BINEXT)
+TARGET_SERVER = $(PLATFORM_NORM).$(ARCH_NORM).$(DNAME)$(BINEXT)
 
 STRINGIFY = $(B)/rend2/stringify$(BINEXT)
 
@@ -747,6 +907,14 @@ $2: $1
 	@cp $1 $2
 endef
 
+# BFP deps/ handling: copy bundled libs to deps/ subfolder for runtime
+define GENERATE_COPY_TARGETS_DEPS
+$(foreach FILE,$1, \
+  $(eval $(call ADD_COPY_TARGET, \
+    $(FILE), \
+    $(addprefix $(B)/deps/,$(notdir $(FILE))))))
+endef
+
 # These functions allow us to generate rules for copying a list of files
 # into the base directory of the build; this is useful for bundling libs,
 # README files or whatever else
@@ -758,7 +926,44 @@ $(foreach FILE,$1, \
 endef
 
 ifneq ($(BUILD_CLIENT),0)
-  $(call GENERATE_COPY_TARGETS,$(CLIENT_EXTRA_FILES))
+  $(call GENERATE_COPY_TARGETS_DEPS,$(CLIENT_EXTRA_FILES))
+endif
+
+ifdef MINGW
+# BFPR deps\ cadence rules: rename-copy vendored DLLs into $(B)/deps and build
+# dlltool import libs bound to deps\<platform>.<arch>.<lib>.dll.
+# Link-time only (pure binutils); no post-link binary rewriting.
+ifeq ($(BFPR_ZLIB_IMP),)
+$(warning BFPR: no mingw zlib import lib found; install mingw32/64-zlib)
+endif
+BFPR_CAD_DLLS += $(B)/deps/$(BFPR_ZLIB_DLL)
+BFPR_CAD_LIBS += $(B)/libzcad.a
+$(B)/deps/$(BFPR_ZLIB_DLL): $(BFPR_ZLIB_SRC)
+	$(echo_cmd) "CP $<"
+	$(Q)mkdir -p $(B)/deps && cp $< $@
+$(B)/zcad.def: $(BFPR_ZLIB_IMP)
+	$(echo_cmd) "DEF $<"
+	$(Q)printf 'LIBRARY "deps\\\\$(BFPR_ZLIB_DLL)"\nEXPORTS\n' > $@
+	$(Q)$(NM) $(BFPR_ZLIB_IMP) | grep ' T ' | sed 's/.* T _\?//' | sort -u >> $@
+$(B)/libzcad.a: $(B)/zcad.def
+	$(echo_cmd) "DLLTOOL $<"
+	$(Q)$(DLLTOOL) -d $< -l $@
+ifeq ($(USE_SDL),1)
+BFPR_CAD_DLLS += $(B)/deps/$(BFPR_SDL_DLL)
+BFPR_CAD_LIBS += $(B)/libSDL2cad.a
+$(B)/deps/$(BFPR_SDL_DLL): $(BFPR_SDL_SRC)
+	$(echo_cmd) "CP $<"
+	$(Q)mkdir -p $(B)/deps && cp $< $@
+$(B)/sdl2cad.def: $(BFPR_SDL_IMP)
+	$(echo_cmd) "DEF $<"
+	$(Q)printf 'LIBRARY "deps\\\\$(BFPR_SDL_DLL)"\nEXPORTS\n' > $@
+	$(Q)$(NM) $(BFPR_SDL_IMP) | grep ' T ' | sed 's/.* T _\?//' | sort -u >> $@
+$(B)/libSDL2cad.a: $(B)/sdl2cad.def
+	$(echo_cmd) "DLLTOOL $<"
+	$(Q)$(DLLTOOL) -d $< -l $@
+endif
+TARGETS += $(BFPR_CAD_DLLS) $(BFPR_CAD_LIBS)
+$(B)/$(TARGET_CLIENT): $(BFPR_CAD_DLLS) $(BFPR_CAD_LIBS)
 endif
 
 # Create the build directories and tools, print out
@@ -797,6 +1002,7 @@ endif
 makedirs:
 	@if [ ! -d $(BUILD_DIR) ];then $(MKDIR) $(BUILD_DIR);fi
 	@if [ ! -d $(B) ];then $(MKDIR) $(B);fi
+	@if [ ! -d $(B)/deps ];then $(MKDIR) $(B)/deps;fi
 	@if [ ! -d $(B)/client ];then $(MKDIR) $(B)/client/qvm;fi
 	@if [ ! -d $(B)/client/jpeg ];then $(MKDIR) $(B)/client/jpeg;fi
 ifeq ($(USE_SYSTEM_OGG),0)
@@ -1206,6 +1412,11 @@ endif
 
 ifeq ($(USE_CURL),1)
   Q3OBJ += $(B)/client/cl_curl.o
+endif
+
+# BFP bundle: embed deps/ zip
+ifneq ($(wildcard $(CMDIR)/bundle.c),)
+  Q3OBJ += $(B)/client/bundle.o
 endif
 
 ifdef MINGW

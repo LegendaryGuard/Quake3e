@@ -3379,18 +3379,69 @@ static void CL_InitRef( void ) {
 #define REND_ARCH_STRING ARCH_STRING
 #endif
 
-	Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
-	ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
+#if defined(_WIN32)
+#define PLATFORM_STR "windows"
+#elif defined(__APPLE__)
+#define PLATFORM_STR "macos"
+#else
+#define PLATFORM_STR "linux"
+#endif
+
+#if defined(__x86_64__) || defined(_M_AMD64)
+#define ARCH_NORM "x64"
+#elif defined(__i386__) || defined(_M_IX86)
+#define ARCH_NORM "x86"
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#define ARCH_NORM "arm64"
+#else
+#define ARCH_NORM REND_ARCH_STRING
+#endif
+
+	Com_sprintf( dllName, sizeof( dllName ), PLATFORM_STR "." ARCH_NORM ".%s" DLL_EXT, cl_renderer->string );
+	ospath = FS_BuildOSPath( Sys_DefaultBasePath(), "deps", dllName );
 	rendererLib = Sys_LoadLibrary( ospath );
-	if ( !rendererLib )
-	{
-		Cvar_ForceReset( "cl_renderer" );
-		Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
-		ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
+	if ( !rendererLib ) {
+		ospath = FS_BuildOSPath( Sys_Pwd(), "deps", dllName );
 		rendererLib = Sys_LoadLibrary( ospath );
-		if ( !rendererLib )
-		{
+	}
+	if ( !rendererLib ) {
+		rendererLib = FS_LoadLibrary( dllName );
+	}
+	if ( !rendererLib ) {
+		rendererLib = Sys_LoadLibrary( dllName );
+	}
+	if ( !rendererLib ) {
+		char legacyName[ MAX_OSPATH ];
+		Com_sprintf( legacyName, sizeof( legacyName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
+		ospath = FS_BuildOSPath( Sys_DefaultBasePath(), "deps", legacyName );
+		rendererLib = Sys_LoadLibrary( ospath );
+		if ( !rendererLib ) {
+			ospath = FS_BuildOSPath( Sys_Pwd(), "deps", legacyName );
+			rendererLib = Sys_LoadLibrary( ospath );
+		}
+		if ( !rendererLib ) {
+			rendererLib = FS_LoadLibrary( legacyName );
+		}
+		if ( !rendererLib ) {
+			rendererLib = Sys_LoadLibrary( legacyName );
+		}
+		if ( !rendererLib && Q_stricmp( cl_renderer->string, "opengl" ) != 0 ) {
+			Cvar_ForceReset( "cl_renderer" );
+			Com_sprintf( dllName, sizeof( dllName ), PLATFORM_STR "." ARCH_NORM ".%s" DLL_EXT, cl_renderer->string );
+			ospath = FS_BuildOSPath( Sys_DefaultBasePath(), "deps", dllName );
+			rendererLib = Sys_LoadLibrary( ospath );
+			if ( !rendererLib ) {
+				rendererLib = FS_LoadLibrary( dllName );
+			}
+			if ( !rendererLib ) {
+				Com_sprintf( legacyName, sizeof( legacyName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
+				rendererLib = FS_LoadLibrary( legacyName );
+			}
+		}
+		if ( !rendererLib ) {
 			Com_Error( ERR_FATAL, "Failed to load renderer %s", dllName );
+		} else {
+			Q_strncpyz( dllName, legacyName, sizeof( dllName ) );
 		}
 	}
 

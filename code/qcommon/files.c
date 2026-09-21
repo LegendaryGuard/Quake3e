@@ -1610,7 +1610,7 @@ Check if file should NOT be loaded from pk3 or pk3dir archives
 */
 static qboolean FS_BannedPakFile( const char *filename )
 {
-	if ( !strcmp( filename, "autoexec.cfg" ) || !strcmp( filename, Q3CONFIG_CFG ) )
+	if ( !strcmp( filename, "bfpr.cfg" ) || !strcmp( filename, "bfpr.server.cfg" ) || !strcmp( filename, Q3CONFIG_CFG ) )
 		return qtrue;
 	else
 		return qfalse;
@@ -4947,6 +4947,7 @@ Q3 media pak0.pk3, you'll want to remove this function
 */
 static void FS_CheckIdPaks( void )
 {
+	return;
 	const searchpath_t *path;
 	const char* pakBasename;
 	qboolean founddemo = qfalse;
@@ -5504,10 +5505,10 @@ void FS_Restart( int checksumFeed ) {
 	// try to start up normally
 	FS_Startup();
 
-	// if we can't find default.cfg, assume that the paths are
+	// if we can't find bfpr.cfg, assume that the paths are
 	// busted and error out now, rather than getting an unreadable
 	// graphics screen when the font fails to load
-	if ( FS_ReadFile( "default.cfg", NULL ) <= 0 ) {
+	if ( FS_ReadFile( "bfpr.cfg", NULL ) <= 0 ) {
 		// this might happen when connecting to a pure server not using BASEGAME/pak0.pk3
 		// (for instance a TA demo server)
 		if (lastValidBase[0]) {
@@ -5522,7 +5523,7 @@ void FS_Restart( int checksumFeed ) {
 			Com_Error( ERR_DROP, "Invalid game folder" );
 			return;
 		}
-		Com_Error( ERR_FATAL, "Couldn't load default.cfg" );
+		Com_Error( ERR_FATAL, "Couldn't load bfpr.cfg" );
 	}
 
 	// new check before safeMode
@@ -5869,6 +5870,14 @@ void *FS_LoadLibrary( const char *name )
 {
 	const searchpath_t *sp = fs_searchpaths;
 	void *libHandle = NULL;
+
+	libHandle = Sys_LoadLibrary( FS_BuildOSPath( Sys_DefaultBasePath(), "deps", name ) );
+	if ( !libHandle ) {
+		libHandle = Sys_LoadLibrary( FS_BuildOSPath( Sys_Pwd(), "deps", name ) );
+	}
+	if ( libHandle ) {
+		return libHandle;
+	}
 
 	while ( !libHandle && sp ) {
 		while ( sp && ( sp->policy != DIR_STATIC || !sp->dir ) ) {

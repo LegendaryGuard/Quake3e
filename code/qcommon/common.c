@@ -3111,16 +3111,19 @@ For controlling environment variables
 */
 static void Com_ExecuteCfg( void )
 {
-	Cbuf_ExecuteText(EXEC_NOW, "exec default.cfg\n");
+	// BFPR: single factory boot config; homepath q3config.cfg still overrides after
+	Cbuf_ExecuteText(EXEC_NOW, "exec bfpr.cfg\n");
 	Cbuf_Execute(); // Always execute after exec to prevent text buffer overflowing
 
 	if (!Com_SafeMode())
 	{
-		// skip the q3config.cfg and autoexec.cfg if "safe" is on the command line
+		// skip the q3config.cfg and bfpr.server.cfg if "safe" is on the command line
 		Cbuf_ExecuteText(EXEC_NOW, "exec " Q3CONFIG_CFG "\n");
 		Cbuf_Execute();
-		Cbuf_ExecuteText(EXEC_NOW, "exec autoexec.cfg\n");
+#ifdef DEDICATED
+		Cbuf_ExecuteText(EXEC_NOW, "exec bfpr.server.cfg\n");
 		Cbuf_Execute();
+#endif
 	}
 }
 
@@ -3213,9 +3216,11 @@ bool CL_CDKeyValidate
 =================
 */
 qboolean Com_CDKeyValidate( const char *key, const char *checksum ) {
-#ifdef STANDALONE
+	// BFPR: standalone - no CD key required
+	(void)key;
+	(void)checksum;
 	return qtrue;
-#else
+#if 0 // was STANDALONE
 	char	ch;
 	byte	sum;
 	char	chs[10];
