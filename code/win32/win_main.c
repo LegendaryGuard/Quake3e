@@ -799,28 +799,30 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	g_wv.hInstance = hInstance;
 	{
 		char exePath[MAX_OSPATH], depsPath[MAX_OSPATH], *slash;
-		if (GetModuleFileNameA(NULL, exePath, sizeof(exePath))) {
-			slash = strrchr(exePath, '\\');
-			if (!slash) slash = strrchr(exePath, '/');
-			if (slash) *slash = '\0';
-			Com_sprintf(depsPath, sizeof(depsPath), "%s\\deps", exePath);
+		WCHAR wDepsPath[MAX_OSPATH];
+		HMODULE k32;
+
+		if ( GetModuleFileNameA( NULL, exePath, sizeof( exePath ) ) ) {
+			slash = strrchr( exePath, '\\' );
+			if ( slash ) *slash = '\0';
+			Com_sprintf( depsPath, sizeof( depsPath ), "%s\\deps", exePath );
 		} else {
-			Com_sprintf(depsPath, sizeof(depsPath), "%s\\deps", Sys_Pwd());
+			Com_sprintf( depsPath, sizeof( depsPath ), "%s\\deps", Sys_Pwd() );
 		}
-		SetDllDirectoryA(depsPath);
-		{
-			HMODULE k32 = GetModuleHandleA("kernel32.dll");
-			if (k32) {
-				typedef BOOL (WINAPI *pSDDD)(DWORD);
-				typedef DLL_DIRECTORY_COOKIE (WINAPI *pADD)(LPCWSTR);
-				pSDDD pSetDefaultDllDirectories = (pSDDD)GetProcAddress(k32, "SetDefaultDllDirectories");
-				pADD pAddDllDirectory = (pADD)GetProcAddress(k32, "AddDllDirectory");
-				if (pSetDefaultDllDirectories) pSetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-				if (pAddDllDirectory) {
-					WCHAR wDepsPath[MAX_OSPATH];
-					MultiByteToWideChar(CP_ACP, 0, depsPath, -1, wDepsPath, MAX_OSPATH);
-					pAddDllDirectory(wDepsPath);
-				}
+
+		k32 = GetModuleHandleA( "kernel32.dll" );
+		if ( k32 ) {
+			typedef BOOL (WINAPI *pSDDD)( DWORD );
+			typedef DLL_DIRECTORY_COOKIE (WINAPI *pADD)( LPCWSTR );
+			pSDDD pSetDefaultDllDirectories = (pSDDD)GetProcAddress( k32, "SetDefaultDllDirectories" );
+			pADD  pAddDllDirectory          = (pADD) GetProcAddress( k32, "AddDllDirectory" );
+
+			if ( pSetDefaultDllDirectories && pAddDllDirectory ) {
+				MultiByteToWideChar( CP_ACP, 0, depsPath, -1, wDepsPath, MAX_OSPATH );
+				pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_DEFAULT_DIRS );
+				pAddDllDirectory( wDepsPath );
+			} else {
+				SetDllDirectoryA( depsPath );
 			}
 		}
 	}

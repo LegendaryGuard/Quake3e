@@ -512,7 +512,7 @@ ifdef MINGW
       BFPR_SDL_IMP=$(MOUNT_DIR)/libsdl/windows/mingw/lib64/libSDL264.dll.a
       BFPR_SDL_DLL=windows.x64.SDL2.dll
     endif
-    CLIENT_LDFLAGS += -L$(B) -lSDL2cad
+    CLIENT_LDFLAGS += -L$(B) -lSDL2cad -ldelayimp
   endif
 
   # BFPR: mingw zlib comes from the sysroot (or a local extraction) and binds
@@ -552,7 +552,7 @@ ifdef MINGW
     else
       CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libcurl/windows/mingw/lib64
     endif
-    CLIENT_LDFLAGS += -lcurl -L$(B) -lzcad -lcrypt32
+    CLIENT_LDFLAGS += -lcurl -L$(B) -lzcad -lcrypt32 -ldelayimp
     # Bundle libcurl.dll when present (shared curl); wildcard guards missing file
     ifeq ($(ARCH),x86)
       ifneq ($(wildcard $(MOUNT_DIR)/libcurl/windows/mingw/lib32/libcurl.dll),)
@@ -943,11 +943,11 @@ $(B)/deps/$(BFPR_ZLIB_DLL): $(BFPR_ZLIB_SRC)
 	$(Q)mkdir -p $(B)/deps && cp $< $@
 $(B)/zcad.def: $(BFPR_ZLIB_IMP)
 	$(echo_cmd) "DEF $<"
-	$(Q)printf 'LIBRARY "deps\\\\$(BFPR_ZLIB_DLL)"\nEXPORTS\n' > $@
+	$(Q)printf 'LIBRARY "$(BFPR_ZLIB_DLL)"\nEXPORTS\n' > $@
 	$(Q)$(NM) $(BFPR_ZLIB_IMP) | grep ' T ' | sed 's/.* T _\?//' | sort -u >> $@
 $(B)/libzcad.a: $(B)/zcad.def
-	$(echo_cmd) "DLLTOOL $<"
-	$(Q)$(DLLTOOL) -d $< -l $@
+	$(echo_cmd) "DLLTOOL(delay) $<"
+	$(Q)$(DLLTOOL) -d $< -y $@
 ifeq ($(USE_SDL),1)
 BFPR_CAD_DLLS += $(B)/deps/$(BFPR_SDL_DLL)
 BFPR_CAD_LIBS += $(B)/libSDL2cad.a
@@ -956,11 +956,11 @@ $(B)/deps/$(BFPR_SDL_DLL): $(BFPR_SDL_SRC)
 	$(Q)mkdir -p $(B)/deps && cp $< $@
 $(B)/sdl2cad.def: $(BFPR_SDL_IMP)
 	$(echo_cmd) "DEF $<"
-	$(Q)printf 'LIBRARY "deps\\\\$(BFPR_SDL_DLL)"\nEXPORTS\n' > $@
+	$(Q)printf 'LIBRARY "$(BFPR_SDL_DLL)"\nEXPORTS\n' > $@
 	$(Q)$(NM) $(BFPR_SDL_IMP) | grep ' T ' | sed 's/.* T _\?//' | sort -u >> $@
 $(B)/libSDL2cad.a: $(B)/sdl2cad.def
-	$(echo_cmd) "DLLTOOL $<"
-	$(Q)$(DLLTOOL) -d $< -l $@
+	$(echo_cmd) "DLLTOOL(delay) $<"
+	$(Q)$(DLLTOOL) -d $< -y $@
 endif
 TARGETS += $(BFPR_CAD_DLLS) $(BFPR_CAD_LIBS)
 $(B)/$(TARGET_CLIENT): $(BFPR_CAD_DLLS) $(BFPR_CAD_LIBS)
